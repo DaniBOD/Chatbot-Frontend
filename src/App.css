@@ -1,42 +1,68 @@
 #root {
-  max-width: 1280px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 2rem;
+  padding: 1.5rem;
   text-align: center;
+  background: #fbfdff;
+  color: #0b1720;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  font-size: 18px;
 }
 
 .logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
+  height: 3.6em;
+  padding: 0.6em;
+  transition: transform 200ms;
 }
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
-}
+.logo:hover { transform: translateY(-2px) }
 
 @keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 @media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
+  a:nth-of-type(2) .logo { animation: logo-spin infinite 20s linear; }
 }
 
-.card {
-  padding: 2em;
+.card { padding: 1.5em; background: #ffffff; border-radius: 10px; box-shadow: 0 6px 18px rgba(11,23,32,0.06); }
+
+.read-the-docs { color: #64748b; font-size: 1rem }
+
+/* Top bar containing selector and small logos */
+.top-bar { position: sticky; top: 0; left: 0; right: 0; background: #fbfdff; border-bottom: 1px solid #d1e3fb; z-index: 900 }
+.top-bar-inner { max-width: 1100px; margin: 0 auto; padding: 0.6rem 1rem; display: flex; align-items: center; justify-content: space-between }
+.selector label { margin-right: 1rem; font-weight: 700; font-size: 1.05rem }
+.selector input[type="radio"] { width: 18px; height: 18px; vertical-align: middle }
+
+/* Form wrapper fixed at top so it appears above main content. */
+.top-form-wrapper { position: fixed; top: 64px; left: 0; right: 0; z-index: 1000; display: flex; justify-content: center; padding: 0.75rem 0 }
+
+.emergency-form { width: min(1100px, 96%); background: #ffffff; border-radius: 12px; box-shadow: 0 14px 40px rgba(11,23,32,0.12); padding: 1rem 1.25rem; display: grid; gap: 0.75rem; grid-template-columns: repeat(2, 1fr); align-items: start }
+.emergency-form .full { grid-column: 1 / -1 }
+.emergency-form-row { display: flex; flex-direction: column; gap: 0.35rem }
+.emergency-form-row label { text-align: left; font-weight: 600; color: #0b1720 }
+.emergency-form-row input, .emergency-form-row textarea { padding: 0.6rem 0.75rem; border-radius: 8px; border: 1px solid #d1e3fb; font-size: 1rem; height: 48px; color: #0b1720; background: #fbfdff }
+.emergency-form-row input::placeholder, .emergency-form-row textarea::placeholder { color: #8b98a6 }
+.emergency-form-row textarea { min-height: 120px; resize: vertical }
+
+.emergency-form-actions { grid-column: 1 / -1; display: flex; gap: 0.75rem; justify-content: flex-end; padding-top: 0.5rem }
+.btn { padding: 0.75rem 1rem; border-radius: 10px; border: none; cursor: pointer; font-weight: 700 }
+.btn.primary { background: #0b63c6; color: #fff; font-size: 1.05rem }
+.btn.primary:hover { background: #084f9a }
+.btn.secondary { background: #e8f2ff; color: #0b1720; font-size: 1.02rem }
+
+/* Focus state for visibility */
+.emergency-form-row input:focus, .emergency-form-row textarea:focus, .selector input:focus, .btn:focus { outline: 3px solid #ffb703; outline-offset: 2px }
+
+.main.with-top-form { margin-top: 360px }
+
+@media (max-width: 720px) {
+  .emergency-form { grid-template-columns: 1fr }
+  .emergency-form { padding: 1rem }
+  .main.with-top-form { margin-top: 580px }
 }
 
-.read-the-docs {
-  color: #888;
-}
+.form-message { grid-column: 1 / -1; text-align: left; padding: 0.6rem 0.8rem; border-radius: 8px; font-weight: 600 }
+.form-message.success { background: #e6f8ef; color: #065f46 }
+.form-message.error { background: #fff4f4; color: #7f1d1d }
