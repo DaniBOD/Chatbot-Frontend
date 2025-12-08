@@ -1,20 +1,21 @@
 import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import GotaBase from './assets/Gota base.png'
 import './App.css'
+import { useNavigate } from 'react-router-dom'
 import EmergencyForm from './components/EmergencyForm'
 
 /**
  * App
- * Main app with a top selector (Emergencia / Reclamo). When 'Emergencia'
- * is selected the `EmergencyForm` is shown above the main content.
- * The component is documented and simple to modify.
+ * Merged component:
+ * - Top selector (Emergencia / Reclamo) allows choosing form or navigation
+ * - Shows EmergencyForm overlay when 'Emergencia' is selected
+ * - Main content shows title, image, and buttons for navigation
+ * - Documented and easy to modify
  */
 function App() {
+  const navigate = useNavigate()
   const [count, setCount] = useState(0)
-
-  // mode: 'none' | 'emergencia' | 'reclamo'
-  const [mode, setMode] = useState('emergencia')
+  const [mode, setMode] = useState('none') // 'none', 'emergencia', 'reclamo'
 
   function handleEmergencySubmit(data /*, json */) {
     // Called after a successful POST. Currently logs to console.
@@ -29,49 +30,91 @@ function App() {
 
   return (
     <>
+      {/* Top selector bar: Emergencia or Reclamo */}
       <div className="top-bar">
         <div className="top-bar-inner">
           <div className="selector">
             <label>
-              <input type="radio" name="mode" value="emergencia" checked={mode === 'emergencia'} onChange={() => setMode('emergencia')} />
+              <input
+                type="radio"
+                name="mode"
+                value="emergencia"
+                checked={mode === 'emergencia'}
+                onChange={() => setMode('emergencia')}
+              />
               Emergencia
             </label>
             <label>
-              <input type="radio" name="mode" value="reclamo" checked={mode === 'reclamo'} onChange={() => setMode('reclamo')} />
+              <input
+                type="radio"
+                name="mode"
+                value="reclamo"
+                checked={mode === 'reclamo'}
+                onChange={() => setMode('reclamo')}
+              />
               Reclamo
             </label>
-          </div>
-
-          <div className="logos">
-            <a href="https://vite.dev" target="_blank" rel="noreferrer">
-              <img src={viteLogo} className="logo" alt="Vite logo" />
-            </a>
-            <a href="https://react.dev" target="_blank" rel="noreferrer">
-              <img src={reactLogo} className="logo react" alt="React logo" />
-            </a>
           </div>
         </div>
       </div>
 
+      {/* Emergency form overlay */}
       {isFormVisible && (
         <div className="top-form-wrapper">
           <EmergencyForm onSubmit={handleEmergencySubmit} onClose={handleCloseForm} />
         </div>
       )}
 
+      {/* Main content */}
       <main className={isFormVisible ? 'main with-top-form' : 'main'}>
-        <h1>Vite + React</h1>
-        <div className="card">
-          <button onClick={() => setCount((c) => c + 1)}>
-            count is {count}
-          </button>
-          <p>
-            Edit <code>src/App.jsx</code> and save to test HMR
-          </p>
-        </div>
-        <p className="read-the-docs">
-          Click on the Vite and React logos to learn more
+        <h2 style={{ textAlign: 'center' }}>Chat de asistencia de cooperativa de agua de Graneros</h2>
+        <img
+          src={GotaBase}
+          alt="Gota Base"
+          style={{
+            position: 'absolute',
+            top: '420px',
+            left: '250px',
+            width: '250px',
+            height: '250px',
+            display: 'block',
+            margin: '0 auto',
+          }}
+        />
+        <p style={{ textAlign: 'center', marginTop: '2rem', fontSize: '1.1rem' }}>
+          Por favor, seleccione el motivo de contacto
         </p>
+        <div className="card" style={{ position: 'relative', height: '400px' }}>
+          {/* Emergencia button (left) */}
+          <button
+            style={{
+              width: '180px',
+              height: '80px',
+              position: 'absolute',
+              top: '150px',
+              left: '150px',
+              cursor: 'pointer',
+            }}
+            onClick={() => setMode('emergencia')}
+          >
+            Emergencia
+          </button>
+
+          {/* Water account problems button (right) */}
+          <button
+            style={{
+              width: '180px',
+              height: '80px',
+              position: 'absolute',
+              top: '150px',
+              right: '150px',
+              cursor: 'pointer',
+            }}
+            onClick={() => navigate('/cuenta')}
+          >
+            Problemas con cuenta de agua
+          </button>
+        </div>
       </main>
     </>
   )
