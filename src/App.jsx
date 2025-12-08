@@ -1,33 +1,27 @@
 import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import GotaBase from './assets/Gota base.png'
 import './App.css'
+import { useNavigate } from 'react-router-dom'
 
 function App() {
+  const navigate = useNavigate();
   const [count, setCount] = useState(0)
 
   return (
     <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
+      
+      <h2 style={{textAlign: 'center'}}>Chat de asistencia de coperativa de agua de graneros</h2>
+      <img src={GotaBase} alt="Gota Base" style={{position: 'absolute', top: '420px', left: '250px', width: '250px', height: '250px', display: 'block', margin: '0 auto'}} />
+      <p>Por favor, seleccione el motivo de contacto </p>
       <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
+        <button style={{width: '180px', height: '80px', position: 'absolute', top: '400px', left: '550px'}} onClick={() => setCount((count) => count + 1)}>
           count is {count}
         </button>
-        <p>
-          Edit <code>src/App.jsx</code> and save to test HMR
-        </p>
+        
+        <button style={{width: '180px', height: '80px', position: 'absolute', top: '400px', right: '550px'}} onClick={() => navigate('/cuenta')}> Problemas con cuenta de agua </button>
+
       </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
+
     </>
   )
 }
