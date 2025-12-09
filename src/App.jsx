@@ -51,6 +51,8 @@ function App() {
     nombreCompleto: '',
     rut: '',
     numeroCliente: '',
+    // queryType: 'consumo' | 'pago' | 'comparar'
+    queryType: null,
   })
 
   // Paso actual en el flujo de emergencia (0-6)
@@ -65,6 +67,9 @@ function App() {
 
   // Estado para manejar "Otro" en tipo de emergencia
   const [waitingForOtherEmergency, setWaitingForOtherEmergency] = useState(false)
+
+  // Resultados de consulta de boletas (para mostrar tarjetas en la UI)
+  const [boletasResults, setBoletasResults] = useState(null)
 
   // Campos del formulario de emergencia en orden
   const emergencyFields = [
@@ -508,6 +513,7 @@ function App() {
         })
         setMessages(updatedMessages)
         setBoletasStep(1)
+        setBoletasData((prev) => ({ ...prev, queryType: 'consumo' }))
       } else if (userInput.trim() === '2') {
         // Usuario seleccionó "Consultar monto a pagar"
         updatedMessages.push({
@@ -516,6 +522,7 @@ function App() {
         })
         setMessages(updatedMessages)
         setBoletasStep(1)
+        setBoletasData((prev) => ({ ...prev, queryType: 'pago' }))
       } else if (userInput.trim() === '3') {
         // Usuario seleccionó "Comparar y/o ver boletas"
         updatedMessages.push({
@@ -524,6 +531,7 @@ function App() {
         })
         setMessages(updatedMessages)
         setBoletasStep(1)
+        setBoletasData((prev) => ({ ...prev, queryType: 'comparar' }))
       } else {
         // Opción inválida
         updatedMessages.push({
@@ -540,11 +548,13 @@ function App() {
       const updatedMessages = [...messages, { role: 'user', text: userInput }]
       
       if (userInput.trim() === '1') {
-        // Usuario seleccionó "Número de cliente"
+        // Usuario seleccionó "Número de cliente" - actualmente no soportado directamente
         updatedMessages.push({
           role: 'bot',
-          text: '¿Cuál es tu número de cliente? (Ej: 12345)',
+          text: 'Actualmente la consulta por número de cliente no está disponible. Por favor proporciona tu RUT para continuar. (Ej: 12345678-9)'
         })
+        // Guardar que vamos a identificar por RUT
+        setBoletasData({ ...boletasData, identificationType: 'rut' })
         setMessages(updatedMessages)
         setBoletasStep(2)
       } else if (userInput.trim() === '2') {
@@ -553,14 +563,17 @@ function App() {
           role: 'bot',
           text: '¿Cuál es tu RUT? (Ej: 12345678-9)',
         })
+        setBoletasData({ ...boletasData, identificationType: 'rut' })
         setMessages(updatedMessages)
         setBoletasStep(2)
       } else if (userInput.trim() === '3') {
-        // Usuario seleccionó "Nombre completo"
+        // Usuario seleccionó "Nombre completo" - ahora soportado
         updatedMessages.push({
           role: 'bot',
-          text: '¿Cuál es tu nombre completo? (Ej: Juan Pérez)',
+          text: '¿Cuál es tu nombre completo? (Ej: Juan Pérez)'
         })
+        // Guardar que vamos a identificar por nombreCompleto
+        setBoletasData({ ...boletasData, identificationType: 'nombreCompleto' })
         setMessages(updatedMessages)
         setBoletasStep(2)
       } else {
@@ -589,7 +602,14 @@ function App() {
       setMessages(updatedMessages)
       setChatState('boletas_complete')
       console.log('Boletas data:', newData)
-      submitBoletasQuery(newData)
+      // If user asked for monto a pagar, request only the vigente pendiente
+      const payload = { ...newData }
+      if (newData.queryType === 'pago') {
+        payload.solo_vigente = true
+        // also suggest filtering by pending state
+        payload.estado_pago = 'pendiente'
+      }
+      submitBoletasQuery(payload)
     }
   }
 
@@ -629,38 +649,89 @@ function App() {
 
   // Envía consulta de boletas al backend
   function submitBoletasQuery(data) {
+    // Validación básica de RUT si está presente
+    if (data.rut) {
+      const rut = data.rut.trim()
+      const cleanRutRegex = /^\d{1,2}\.?\d{3}\.?\d{3}-[\dkK]$|^\d{7,8}-[\dkK]$/
+      if (!cleanRutRegex.test(rut)) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'bot', text: 'Formato de RUT inválido. Por favor use 12345678-9 o 12.345.678-9' },
+        ])
+        return
+      }
+    }
+
     // TODO: Reemplazar con tu URL de backend
-    const apiUrl = 'http://localhost:8000/api/boletas/'
+    const apiUrl = 'http://localhost:8000/api/boletas/consultar/'
+    console.debug('Enviar consulta boletas payload:', data)
     fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     })
-      .then((res) => {
-        if (res.ok) {
-          return res.json()
-        } else {
-          throw new Error(`HTTP ${res.status}`)
+      .then(async (res) => {
+        const text = await res.text()
+        let parsed = null
+        try {
+          parsed = text ? JSON.parse(text) : null
+        } catch (err) {
+          // no-op
         }
-      })
-      .then((boletas) => {
+        if (res.ok) return parsed
+        // If server returned errors in JSON, show them to user
+        const errMsg = parsed && (parsed.detail || parsed.non_field_errors || parsed[Object.keys(parsed)[0]]) ? parsed : { detail: text || `HTTP ${res.status}` }
+        console.error('Error respuesta boletas:', res.status, errMsg)
+        // show server message if available
+        const display = parsed && (parsed.detail || parsed.error) ? (parsed.detail || parsed.error) : 'Hubo un error al consultar tus boletas. Por favor, intenta nuevamente.'
         setMessages((prev) => [
           ...prev,
-          {
-            role: 'bot',
-            text: `✓ Consulta realizada correctamente. Aquí están tus boletas: ${JSON.stringify(boletas)}`,
-          },
+          { role: 'bot', text: `⚠ ${display}` },
         ])
+        throw new Error(`HTTP ${res.status}`)
+      })
+      .then((respData) => {
+          // Normalizar lista (puede venir paginada) o un objeto único
+          const list = respData && respData.results ? respData.results : respData
+
+          // Si la petición solicitó solo la boleta vigente, manejar ausencia de pendientes
+          if (data && data.solo_vigente) {
+            // respuesta puede ser: [] (lista vacía), null, o un objeto con la boleta
+            if (!respData || (Array.isArray(respData) && respData.length === 0)) {
+              // No hay boletas pendientes
+              setBoletasResults([])
+              setMessages((prev) => [
+                ...prev,
+                { role: 'bot', text: '✓ No se encontraron boletas pendientes. Todas tus boletas están pagadas.' },
+              ])
+              return
+            }
+
+            // Si vino un objeto único, normalizar a lista para renderizar de forma consistente
+            const vigente = Array.isArray(respData) ? respData[0] : respData
+            setBoletasResults([vigente])
+            setMessages((prev) => [
+              ...prev,
+              { role: 'bot', text: '✓ Boleta vigente encontrada. Aquí está la boleta a pagar:' },
+            ])
+            return
+          }
+
+          setBoletasResults(list)
+          setMessages((prev) => [
+            ...prev,
+            { role: 'bot', text: '✓ Consulta realizada correctamente. Aquí están tus boletas:' },
+          ])
       })
       .catch((err) => {
         console.error('Error consultando boletas:', err)
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: 'bot',
-            text: '⚠ Hubo un error al consultar tus boletas. Por favor, intenta nuevamente.',
-          },
-        ])
+        // if we already pushed a server error message above, avoid duplicating
+        if (!messages.some((m) => m.text && m.text.includes('Hubo un error al consultar tus boletas'))) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'bot', text: '⚠ Hubo un error al consultar tus boletas. Por favor, intenta nuevamente.' },
+          ])
+        }
       })
   }
 
@@ -743,7 +814,7 @@ function App() {
       </div>
 
       {/* Main chat area */}
-      <main style={{ padding: '2rem', maxWidth: '1200px', margin: '0 auto', minHeight: '80vh', backgroundColor: '#fff', borderRadius: '12px', margin: '2rem auto', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
+      <main style={{ padding: '2rem', maxWidth: '1200px', minHeight: '80vh', backgroundColor: '#fff', borderRadius: '12px', margin: '2rem auto', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
         {chatState === 'main' && (
           <>
             <p style={{ fontSize: '1.1rem', marginBottom: '2rem', textAlign: 'center' }}>
@@ -988,6 +1059,24 @@ function App() {
                 </div>
               </div>
             ))}
+            {/* Mostrar resultados de boletas como tarjetas legibles */}
+            {boletasResults && (
+              <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {boletasResults.map((b) => (
+                  <div key={b.id_boleta || b.id} style={{ border: '1px solid #e0e0e0', padding: '0.75rem', borderRadius: '8px', background: '#fff', maxWidth: '90%' }}>
+                    <div style={{ fontWeight: 700 }}>{b.nombre} <span style={{ fontWeight: 400, marginLeft: '0.5rem', color: '#666' }}>{b.rut}</span></div>
+                    <div style={{ fontSize: '0.9rem', color: '#444', marginTop: '0.25rem' }}>{b.direccion || ''}</div>
+                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                      <div><strong>Periodo:</strong> {b.periodo_facturacion}</div>
+                      <div><strong>Emisión:</strong> {b.fecha_emision}</div>
+                      <div><strong>Consumo:</strong> {b.consumo} m³</div>
+                      <div><strong>Monto:</strong> ${b.monto}</div>
+                      <div><strong>Estado:</strong> {b.estado_pago_display || b.estado_pago}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </main>
