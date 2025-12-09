@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
+import { emergencyUrl } from './config'
 import GotaBase from './assets/Gota base.png'
+import GotaMecanico from './assets/Gota mecanico.png'
+import GotaLentes from './assets/Gota lentes.png'
 import './App.css'
+import CooperativaLogo from './assets/Cooperativa logo.png'
 import { useNavigate } from 'react-router-dom'
 
 /**
@@ -27,7 +31,7 @@ function App() {
   const [messages, setMessages] = useState([
     {
       role: 'bot',
-      text: '¡Hola! Soy el chatbot de la Cooperativa de Agua Potable La Compañía. ¿En qué puedo ayudarte hoy?',
+      text: '¡Hola! Soy GotinBot, el asistente de la Cooperativa La Compañía. Estoy aquí para ayudarte con preguntas generales sobre servicios, facturación y atención. Puedes preguntar de forma anónima y con gusto te responderé.',
     },
   ])
 
@@ -70,6 +74,13 @@ function App() {
 
   // Resultados de consulta de boletas (para mostrar tarjetas en la UI)
   const [boletasResults, setBoletasResults] = useState(null)
+  const [compareCandidates, setCompareCandidates] = useState(null)
+  const [awaitingCompareSelection, setAwaitingCompareSelection] = useState(false)
+  const [isTyping, setIsTyping] = useState(false)
+  const messagesContainerRef = useRef(null)
+  const mainMessagesRef = useRef(null)
+  // Chat session id for backend conversational service
+  const [chatSessionId, setChatSessionId] = useState(null)
 
   // Campos del formulario de emergencia en orden
   const emergencyFields = [
@@ -150,7 +161,7 @@ function App() {
         },
         {
           role: 'bot',
-          text: `Perfecto, voy a ayudarte con tu consulta de boletas. Que es lo que necesito saber:\n 1. Consultar consumo \n 2. Consultar monto a pagar \n 3. Comparar y /o ver boletas`,
+          text: `Perfecto, voy a ayudarte con tu consulta de boletas. Que es lo que necesito saber:\n 1. Consultar consumo \n 2. Consultar monto a pagar \n 3. Comparar boletas`,
         },
       ])
     } else {
@@ -158,7 +169,7 @@ function App() {
       setMessages([
         {
           role: 'bot',
-          text: '¡Hola! Soy el chatbot de la Cooperativa de Agua Potable La Compañía. ¿En qué puedo ayudarte hoy?',
+          text: '¡Hola! Soy GotinBot, el asistente de la Cooperativa La Compañía. Estoy aquí para ayudarte con preguntas generales sobre servicios, facturación y atención. Puedes preguntar de forma anónima y con gusto te responderé.',
         },
       ])
       setMainChatMessages([])
@@ -177,7 +188,7 @@ function App() {
     setMessages([
       {
         role: 'bot',
-        text: '¡Hola! Soy el chatbot de la Cooperativa de Agua Potable La Compañía. ¿En qué puedo ayudarte hoy?',
+        text: '¡Hola! Soy GotinBot, el asistente de la Cooperativa La Compañía. Estoy aquí para ayudarte con preguntas generales sobre servicios, facturación y atención. Puedes preguntar de forma anónima y con gusto te responderé.',
       },
     ])
     setEmergencyData({
@@ -202,12 +213,24 @@ function App() {
   function handleConsultaBoletas() {
     setChatState('boletas')
     setBoletasStep(0)
+    // Initialize backend chat session for boletas context
+    const initApi = 'http://localhost:8000/api/boletas/chat/init/'
+    fetch(initApi, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    })
+      .then(async (res) => (res.ok ? res.json() : Promise.reject(res)))
+      .then((data) => {
+        if (data && data.session_id) setChatSessionId(data.session_id)
+      })
+      .catch((err) => console.debug('No se pudo iniciar sesión de chat (opcional):', err))
     setMessages((prev) => [
       ...prev,
       { role: 'user', text: 'Consulta de boletas' },
       {
         role: 'bot',
-        text: `Perfecto, voy a ayudarte con tu consulta de boletas. Que es lo que necesito saber:\n 1. Consultar consumo \n 2. Consultar monto a pagar \n 3. Comparar y /o ver boletas`,
+        text: `Perfecto, voy a ayudarte con tu consulta de boletas. Que es lo que necesito saber:\n 1. Consultar consumo \n 2. Consultar monto a pagar \n 3. Comparar boletas`,
       },
     ])
     setMainChatMessages([])
@@ -501,6 +524,31 @@ function App() {
   function handleBoletasResponse(userInput) {
     if (!userInput.trim()) return
 
+    // Si estamos esperando selección múltiple para comparar
+    if (awaitingCompareSelection && compareCandidates && compareCandidates.length > 0) {
+      const updatedMessages = [...messages, { role: 'user', text: userInput }]
+      // Parsear números separados por comas
+      const nums = userInput.split(',').map(s => parseInt(s.trim(), 10)).filter(n => !isNaN(n))
+      if (nums.length === 0) {
+        updatedMessages.push({ role: 'bot', text: 'No entendí tu selección. Por favor responde con números separados por comas (ej: 1,3).' })
+        setMessages(updatedMessages)
+        return
+      }
+      // Obtener ids
+      const ids = nums.map(n => (compareCandidates[n-1] && (compareCandidates[n-1].id_boleta || compareCandidates[n-1].id)) ? (compareCandidates[n-1].id_boleta || compareCandidates[n-1].id) : null).filter(Boolean)
+      if (ids.length === 0) {
+        updatedMessages.push({ role: 'bot', text: 'Selección inválida. Revisa los números disponibles e inténtalo de nuevo.' })
+        setMessages(updatedMessages)
+        return
+      }
+      updatedMessages.push({ role: 'bot', text: '✓ Recibido. Comparando las boletas seleccionadas...' })
+      setMessages(updatedMessages)
+      setAwaitingCompareSelection(false)
+      // Enviar petición de comparación
+      submitCompare(ids)
+      return
+    }
+
     // Si es el primer paso (selección de opción)
     if (boletasStep === 0) {
       const updatedMessages = [...messages, { role: 'user', text: userInput }]
@@ -524,10 +572,10 @@ function App() {
         setBoletasStep(1)
         setBoletasData((prev) => ({ ...prev, queryType: 'pago' }))
       } else if (userInput.trim() === '3') {
-        // Usuario seleccionó "Comparar y/o ver boletas"
+        // Usuario seleccionó "Comparar boletas"
         updatedMessages.push({
           role: 'bot',
-          text: 'Has seleccionado: Comparar y/o ver boletas\n\n¿Con qué datos deseas identificarte?\n1. Número de cliente\n2. RUT\n3. Nombre completo',
+          text: 'Has seleccionado: Comparar boletas\n\n¿Con qué datos deseas identificarte?\n1. Número de cliente\n2. RUT\n3. Nombre completo',
         })
         setMessages(updatedMessages)
         setBoletasStep(1)
@@ -605,7 +653,12 @@ function App() {
         text: '✓ Gracias por proporcionar tu información. Consultando tus boletas...',
       })
       setMessages(updatedMessages)
-      setChatState('boletas_complete')
+      // If comparing, keep in 'boletas' state so user can select multiple items
+      if (newData.queryType === 'comparar') {
+        setAwaitingCompareSelection(false) // will be set true after candidates arrive
+      } else {
+        setChatState('boletas_complete')
+      }
       console.log('Boletas data (final):', newData)
       // If user asked for monto a pagar, request only the vigente pendiente
       const payload = { ...newData }
@@ -620,14 +673,116 @@ function App() {
 
   // Envía datos de emergencia al backend
   function submitEmergency(data) {
-    // TODO: Reemplazar con tu URL de backend
-    const apiUrl = 'http://localhost:8000/api/emergencias/'
-    fetch(apiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    })
-      .then((res) => {
+    const apiUrl = emergencyUrl()
+
+    // Mapas para convertir etiquetas visibles del chat a las claves esperadas por el backend
+    // Mapas base (etiqueta visible -> clave en backend)
+    const sectorMap = {
+      'Anibana': 'anibana',
+      'El Molino': 'el_molino',
+      'La Compañía': 'la_compania',
+      'El Maitén 1': 'el_maiten_1',
+      'La Morera': 'la_morera',
+      'El Maitén 2': 'el_maiten_2',
+      'Santa Margarita': 'santa_margarita',
+    }
+
+    const tipoEmergenciaMap = {
+      'Rotura de Matriz': 'rotura_matriz',
+      'Baja Presión': 'baja_presion',
+      'Fuga de Agua': 'fuga_agua',
+      'Cañería Rota': 'caneria_rota',
+      'Agua Contaminada': 'agua_contaminada',
+      'Sin Agua': 'sin_agua',
+      'Otro': 'otro',
+      // also allow some lowercase/alternate forms
+      'Rotura de matriz': 'rotura_matriz',
+      'Baja presion': 'baja_presion',
+      'Agua contaminada': 'agua_contaminada',
+    }
+
+    const nivelPrioridadMap = {
+      'Baja': 'baja',
+      'Media': 'media',
+      'Alta': 'alta',
+      'Critica': 'critica',
+    }
+
+    // Normaliza una etiqueta: elimina acentos, signos y pasa a minúsculas
+    function normalizeLabel(s) {
+      if (!s && s !== 0) return ''
+      return String(s)
+        .normalize('NFD')
+        .replace(/\p{Diacritic}/gu, '')
+        .replace(/[^\w\s]/g, '')
+        .trim()
+        .toLowerCase()
+    }
+
+    // Construye un mapa normalizado para búsquedas insensibles a acentos/mayúsculas
+    function buildNormalizedMap(m) {
+      const nm = {}
+      Object.entries(m).forEach(([k, v]) => {
+        nm[normalizeLabel(k)] = v
+      })
+      return nm
+    }
+
+    const normSectorMap = buildNormalizedMap(sectorMap)
+    const normTipoMap = buildNormalizedMap(tipoEmergenciaMap)
+    const normNivelMap = buildNormalizedMap(nivelPrioridadMap)
+
+    // Si viene image (data URL), convertir a Blob y enviar como multipart/form-data
+    const send = async () => {
+      try {
+        let res
+        if (data.image) {
+          // convertir data:image/...;base64,... a Blob
+          const dataURLtoBlob = (dataURL) => {
+            const parts = dataURL.split(',')
+            const m = parts[0].match(/:(.*?);/)
+            const mime = m ? m[1] : 'application/octet-stream'
+            const byteString = atob(parts[1])
+            const ab = new ArrayBuffer(byteString.length)
+            const ia = new Uint8Array(ab)
+            for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
+            return new Blob([ab], { type: mime })
+          }
+
+          const fd = new FormData()
+          // Mapear campos al nombre esperado por el backend
+          fd.append('nombre_usuario', data.nombreCompleto || '')
+          fd.append('telefono', data.telefono || '')
+          // Mapear etiquetas a claves esperadas por el backend
+          fd.append('sector', normSectorMap[normalizeLabel(data.sector)] || sectorMap[data.sector] || data.sector || '')
+          fd.append('direccion', data.direccion || '')
+          fd.append('descripcion', data.descripcion || '')
+          fd.append('tipo_emergencia', normTipoMap[normalizeLabel(data.tipoEmergencia)] || tipoEmergenciaMap[data.tipoEmergencia] || data.tipoEmergencia || '')
+          // Si el usuario respondió con nivel de prioridad (Baja/Media/Alta/Critica), enviarlo como nivel_prioridad
+          if (normNivelMap[normalizeLabel(data.estadoEmergencia)]) {
+            fd.append('nivel_prioridad', normNivelMap[normalizeLabel(data.estadoEmergencia)])
+          } else {
+            fd.append('estado_emergencia', data.estadoEmergencia || '')
+          }
+          const blob = dataURLtoBlob(data.image)
+          fd.append('fotografia', blob, 'photo.jpg')
+
+          res = await fetch(apiUrl, { method: 'POST', body: fd })
+        } else {
+          // Enviar JSON mapeando campos
+          const payload = {
+            nombre_usuario: data.nombreCompleto || '',
+            telefono: data.telefono || '',
+            direccion: data.direccion || '',
+            descripcion: data.descripcion || '',
+            sector: normSectorMap[normalizeLabel(data.sector)] || sectorMap[data.sector] || data.sector || '',
+            tipo_emergencia: normTipoMap[normalizeLabel(data.tipoEmergencia)] || tipoEmergenciaMap[data.tipoEmergencia] || data.tipoEmergencia || '',
+          }
+          if (normNivelMap[normalizeLabel(data.estadoEmergencia)]) payload.nivel_prioridad = normNivelMap[normalizeLabel(data.estadoEmergencia)]
+          else payload.estado_emergencia = data.estadoEmergencia || ''
+          res = await fetch(apiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+        }
+
         if (res.ok) {
           setMessages((prev) => [
             ...prev,
@@ -637,19 +792,22 @@ function App() {
             },
           ])
         } else {
-          throw new Error(`HTTP ${res.status}`)
+          const txt = await res.text().catch(() => null)
+          throw new Error(txt || `HTTP ${res.status}`)
         }
-      })
-      .catch((err) => {
+      } catch (err) {
         console.error('Error enviando emergencia:', err)
         setMessages((prev) => [
           ...prev,
           {
             role: 'bot',
-            text: '⚠ Hubo un error al enviar tu reporte. Por favor, intenta nuevamente.',
+            text: `⚠ Hubo un error al enviar tu reporte. ${err && err.message ? err.message : ''}`,
           },
         ])
-      })
+      }
+    }
+
+    send()
   }
 
   // Envía consulta de boletas al backend
@@ -699,39 +857,58 @@ function App() {
         throw new Error(`HTTP ${res.status}`)
       })
         .then((respData) => {
-          console.debug('Boletas response parsed:', respData)
-          // Normalizar lista (puede venir paginada) o un objeto único
-          const list = respData && respData.results ? respData.results : respData
+            console.debug('Boletas response parsed:', respData)
+            // Normalizar lista (puede venir paginada) o un objeto único
+            const list = respData && respData.results ? respData.results : respData
 
-          // Si la petición solicitó solo la boleta vigente, manejar ausencia de pendientes
-          if (data && data.solo_vigente) {
-            // respuesta puede ser: [] (lista vacía), null, o un objeto con la boleta
-            if (!respData || (Array.isArray(respData) && respData.length === 0)) {
-              // No hay boletas pendientes
-              setBoletasResults([])
+            // Si la petición solicitó solo la boleta vigente, manejar ausencia de pendientes
+            if (data && data.solo_vigente) {
+              if (!respData || (Array.isArray(respData) && respData.length === 0)) {
+                setBoletasResults([])
+                setMessages((prev) => [
+                  ...prev,
+                  { role: 'bot', text: '✓ No se encontraron boletas pendientes. Todas tus boletas están pagadas.' },
+                ])
+                return
+              }
+
+              const vigente = Array.isArray(respData) ? respData[0] : respData
+              setBoletasResults([vigente])
               setMessages((prev) => [
                 ...prev,
-                { role: 'bot', text: '✓ No se encontraron boletas pendientes. Todas tus boletas están pagadas.' },
+                { role: 'bot', text: '✓ Boleta vigente encontrada. Aquí está la boleta a pagar:' },
               ])
               return
             }
 
-            // Si vino un objeto único, normalizar a lista para renderizar de forma consistente
-            const vigente = Array.isArray(respData) ? respData[0] : respData
-            setBoletasResults([vigente])
+            // Si es una comparación, en lugar de mostrar inmediatamente, pedir selección múltiple
+            if (data && data.queryType === 'comparar') {
+              const candidates = Array.isArray(list) ? list : (list ? [list] : [])
+              if (!candidates || candidates.length === 0) {
+                setMessages((prev) => [
+                  ...prev,
+                  { role: 'bot', text: '✓ No se encontraron boletas para comparar.' },
+                ])
+                return
+              }
+              setCompareCandidates(candidates)
+              setAwaitingCompareSelection(true)
+              // Mostrar opciones numeradas al usuario
+              const lines = candidates.map((b, i) => `${i+1}. ${b.periodo_facturacion} - ${b.fecha_emision} - ${b.monto}`)
+              setMessages((prev) => [
+                ...prev,
+                { role: 'bot', text: 'Por favor selecciona las boletas a comparar respondiendo con los números separados por comas (ej: 1,3):' },
+                { role: 'bot', text: lines.join('\n') },
+              ])
+              return
+            }
+
+            setBoletasResults(list)
             setMessages((prev) => [
               ...prev,
-              { role: 'bot', text: '✓ Boleta vigente encontrada. Aquí está la boleta a pagar:' },
+              { role: 'bot', text: '✓ Consulta realizada correctamente. Aquí están tus boletas:' },
             ])
-            return
-          }
-
-          setBoletasResults(list)
-          setMessages((prev) => [
-            ...prev,
-            { role: 'bot', text: '✓ Consulta realizada correctamente. Aquí están tus boletas:' },
-          ])
-      })
+        })
       .catch((err) => {
         console.error('Error consultando boletas:', err)
         // if we already pushed a server error message above, avoid duplicating
@@ -741,6 +918,87 @@ function App() {
             { role: 'bot', text: '⚠ Hubo un error al consultar tus boletas. Por favor, intenta nuevamente.' },
           ])
         }
+      })
+  }
+
+  // Enviar petición de comparación al backend con boletas_ids
+  function submitCompare(boletas_ids) {
+    const apiUrl = 'http://localhost:8000/api/boletas/comparar/'
+    const payload = { boletas_ids }
+    console.debug('Enviar comparar payload:', payload)
+    fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(async (res) => {
+        const text = await res.text()
+        let parsed = null
+        try { parsed = text ? JSON.parse(text) : null } catch (e) {}
+        if (res.ok) return parsed
+        const display = parsed && (parsed.detail || parsed.error) ? (parsed.detail || parsed.error) : 'Hubo un error al comparar tus boletas.'
+        setMessages((prev) => [
+          ...prev,
+          { role: 'bot', text: `⚠ ${display}` },
+        ])
+        throw new Error(`HTTP ${res.status}`)
+      })
+      .then((resp) => {
+        console.debug('Comparar response:', resp)
+        if (!resp || !resp.boletas) {
+          setMessages((prev) => [
+            ...prev,
+            { role: 'bot', text: '⚠ No se pudo obtener la comparación de boletas.' },
+          ])
+          return
+        }
+        // Mostrar resumen y detalles
+        const stats = resp.estadisticas || resp.statistics || {}
+        setBoletasResults(resp.boletas)
+        setCompareCandidates(null)
+        setMessages((prev) => [
+          ...prev,
+          { role: 'bot', text: `✓ Comparación lista. Cantidad: ${resp.boletas.length}. Consumo total: ${stats.consumo_total || '-'} m³. Monto total: ${stats.monto_total || '-'}.` },
+        ])
+        setChatState('boletas_complete')
+        // Send the selected boletas to the conversational backend so the assistant can generate a textual analysis
+        try {
+          const chatPayload = {
+            session_id: chatSessionId || undefined,
+            message: 'Por favor, analiza y comenta las boletas seleccionadas para el usuario.',
+            boletas_ids: resp.boletas.map((b) => b.id_boleta || b.id).filter(Boolean)
+          }
+          const chatApi = 'http://localhost:8000/api/boletas/chat/message/'
+          setIsTyping(true)
+          fetch(chatApi, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(chatPayload),
+          })
+            .then(async (r) => {
+              const t = await r.text()
+              let parsed = null
+              try { parsed = t ? JSON.parse(t) : null } catch (e) { parsed = null }
+              if (!r.ok) {
+                const display = parsed && (parsed.detail || parsed.error) ? (parsed.detail || parsed.error) : `HTTP ${r.status}`
+                setIsTyping(false)
+                setMessages((prev) => [...prev, { role: 'bot', text: `⚠ ${display}` }])
+                throw new Error(`HTTP ${r.status}`)
+              }
+              return parsed
+            })
+            .then((chatResp) => {
+              setIsTyping(false)
+              if (chatResp && chatResp.message) setMessages((prev) => [...prev, { role: 'bot', text: chatResp.message }])
+              if (chatResp && chatResp.session_id) setChatSessionId(chatResp.session_id)
+            })
+            .catch((err) => { setIsTyping(false); console.error('Error generando análisis conversacional:', err) })
+        } catch (e) {
+          console.debug('No se pudo enviar boletas al chat backend:', e)
+        }
+      })
+      .catch((err) => {
+        console.error('Error comparando boletas:', err)
       })
   }
 
@@ -756,80 +1014,220 @@ function App() {
     if (!trimmed) return
 
     const userMsg = { role: 'user', text: trimmed }
-    const botMsg = {
-      role: 'bot',
-      text: `He recibido tu pregunta: "${trimmed}". Puedo ayudarte con información general de la cooperativa, pagos y boletas. Si prefieres, también puedes usar los botones de arriba.`,
-    }
-
-    setMainChatMessages((prev) => [...prev, userMsg, botMsg])
+    setMainChatMessages((prev) => [...prev, userMsg])
     setMainChatInput('')
+
+    // Send to public anonymous backend endpoint (RAG-only)
+    const apiUrl = 'http://localhost:8000/api/public/chat/message/'
+    setIsTyping(true)
+    const payload = { session_id: chatSessionId || undefined, message: trimmed, anonymous: chatState === 'main' }
+    fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(async (res) => {
+        const textRes = await res.text()
+        let parsed = null
+        try { parsed = textRes ? JSON.parse(textRes) : null } catch (e) { parsed = null }
+        if (!res.ok) {
+          const display = parsed && (parsed.detail || parsed.error) ? (parsed.detail || parsed.error) : `HTTP ${res.status}`
+          setMainChatMessages((prev) => [...prev, { role: 'bot', text: `⚠ ${display}` }])
+          setIsTyping(false)
+          throw new Error(`HTTP ${res.status}`)
+        }
+        setIsTyping(false)
+        const botText = (parsed && (parsed.message || parsed.answer || parsed.response)) ? (parsed.message || parsed.answer || parsed.response) : 'He recibido tu pregunta y la estoy procesando.'
+        if (parsed && parsed.session_id) setChatSessionId(parsed.session_id)
+
+        // Si estamos en la sección principal (anónima) y el asistente responde solicitando datos personales,
+        // intentamos una segunda petición automática solicitando que responda sin pedir PII.
+        if (chatState === 'main' && /(RUT|rut|identif|documento|dni|cedula|identific)/i.test(botText)) {
+          // Intentar una segunda petición para obtener una respuesta anónima antes de mostrar orientación
+          try {
+            setIsTyping(true)
+            const followupPayload = { session_id: chatSessionId || undefined, message: `Por favor responde de forma anónima y sin solicitar datos personales. Responde a la siguiente pregunta: ${trimmed}` }
+            const followRes = await fetch(apiUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(followupPayload),
+            })
+            const followText = await followRes.text()
+            let followParsed = null
+            try { followParsed = followText ? JSON.parse(followText) : null } catch (e) { followParsed = null }
+            setIsTyping(false)
+            if (followRes.ok) {
+              const followBotText = (followParsed && (followParsed.message || followParsed.answer || followParsed.response)) ? (followParsed.message || followParsed.answer || followParsed.response) : null
+              if (followBotText && !/(RUT|rut|identif|documento|dni|cedula|identific)/i.test(followBotText)) {
+                setMainChatMessages((prev) => [...prev, { role: 'bot', text: followBotText }])
+                if (followParsed && followParsed.session_id) setChatSessionId(followParsed.session_id)
+                return
+              }
+            }
+
+            // Si la segunda respuesta tampoco sirve, mostrar mensaje de orientación y aviso final
+            const anonReplacement = 'Puedes consultar aquí de forma anónima sobre servicios, horarios y trámites generales. Para consultas que requieran datos personales, por favor usa "Consulta de boletas".'
+            setMainChatMessages((prev) => [...prev, { role: 'bot', text: anonReplacement }])
+            setMainChatMessages((prev) => [...prev, { role: 'bot', text: 'Lo siento, no puedo acceder a información privada desde esta sección. Si necesitas consultas que requieran datos personales, por favor selecciona "Consulta de boletas".' }])
+          } catch (e) {
+            console.error('Error en followup anónimo:', e)
+            setIsTyping(false)
+            setMainChatMessages((prev) => [...prev, { role: 'bot', text: 'Ocurrió un error al procesar la petición. Por favor intenta nuevamente.' }])
+          }
+        } else {
+          setMainChatMessages((prev) => [...prev, { role: 'bot', text: botText }])
+        }
+      })
+      .catch((err) => {
+        console.error('Error enviando pregunta general al backend:', err)
+        // Asegurar que el indicador de escritura se apague en caso de fallo de red
+        setIsTyping(false)
+      })
   }
 
-  return (
-    <>
-      {/* Header */}
-      <div style={{ backgroundColor: '#0b63c6', color: '#fff', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0, flex: 1, textAlign: 'center' }}>💬 Chatbot - La Compañía</h1>
-        <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <button
-            onClick={handleRestartChat}
-            style={{
-              padding: '0.75rem 1.25rem',
-              backgroundColor: '#fff',
-              color: '#0b63c6',
-              border: 'none',
-              borderRadius: '20px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              fontSize: '0.95rem',
-              transition: 'all 200ms',
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#e8f2ff'
-              e.target.style.transform = 'scale(1.05)'
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#fff'
-              e.target.style.transform = 'scale(1)'
-            }}
-          >
-            🔄 Reiniciar Chat
+  // Permite continuar la conversación con el asistente después de una consulta de boletas
+  function handleContinueConversationFromBoletas(text) {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    // Añadir mensaje de usuario al hilo de boletas
+    setMessages((prev) => [...prev, { role: 'user', text: trimmed }])
+
+    // Prepare payload for chat message endpoint
+    const payload = { session_id: chatSessionId || undefined, message: trimmed }
+    // If we have boletasResults, include their ids to provide context
+    try {
+      if (boletasResults && Array.isArray(boletasResults) && boletasResults.length > 0) {
+        payload.boletas_ids = boletasResults.map((b) => b.id_boleta || b.id).filter(Boolean)
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    const apiUrl = 'http://localhost:8000/api/boletas/chat/message/'
+    setIsTyping(true)
+    fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+      .then(async (res) => {
+        const textRes = await res.text()
+        let parsed = null
+        try { parsed = textRes ? JSON.parse(textRes) : null } catch (e) { parsed = null }
+        if (!res.ok) {
+          const display = parsed && (parsed.detail || parsed.error) ? (parsed.detail || parsed.error) : `HTTP ${res.status}`
+          setMessages((prev) => [...prev, { role: 'bot', text: `⚠ ${display}` }])
+          setIsTyping(false)
+          throw new Error(`HTTP ${res.status}`)
+        }
+        setIsTyping(false)
+        if (!parsed) {
+          setMessages((prev) => [...prev, { role: 'bot', text: '⚠ No se recibió respuesta del asistente.' }])
+          return
+        }
+        // Save session_id if backend returned/confirmed it
+        if (parsed.session_id) setChatSessionId(parsed.session_id)
+        // Show assistant message
+        if (parsed.message) {
+          setMessages((prev) => [...prev, { role: 'bot', text: parsed.message }])
+        } else {
+          setMessages((prev) => [...prev, { role: 'bot', text: 'He recibido tu pregunta y la estoy procesando.' }])
+        }
+      })
+      .catch((err) => {
+        setIsTyping(false)
+        console.error('Error enviando pregunta al chat backend:', err)
+      })
+    }
+
+      // Auto-scroll messages container to bottom when messages change
+      useEffect(() => {
+        try {
+          if (messagesContainerRef.current) {
+            messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight
+          }
+        } catch (e) { /* ignore */ }
+      }, [messages, boletasResults, isTyping])
+
+      // Auto-scroll for main chat area
+      useEffect(() => {
+        try {
+          if (mainMessagesRef.current) {
+            mainMessagesRef.current.scrollTop = mainMessagesRef.current.scrollHeight
+          }
+        } catch (e) { /* ignore */ }
+      }, [mainChatMessages, isTyping])
+
+      // Helper: choose avatar image for bot messages based on message content
+      const getBotAvatarSrc = (text) => {
+        // Prefer chatState when applicable
+        if (chatState === 'boletas') return GotaLentes
+        if (chatState === 'emergency' || chatState === 'emergency_complete') return GotaMecanico
+        if (!text) return GotaBase
+        if (/boleta|boletas/i.test(text)) return GotaLentes
+        if (/emergenc/i.test(text)) return GotaMecanico
+        return GotaBase
+      }
+
+      // Render a single message with avatar
+      const renderMessage = (msg, idx) => {
+        const isUser = msg.role === 'user'
+        const botSrc = !isUser ? getBotAvatarSrc(msg.text) : null
+        const avatarStyle = { width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', border: '2px solid #0b63c6', boxShadow: '0 2px 6px rgba(0,0,0,0.12)' }
+        return (
+          <div key={idx} style={{ display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start', marginBottom: '1rem', alignItems: 'flex-end' }}>
+            {!isUser && (
+              <img src={botSrc} alt="bot-avatar" style={{ ...avatarStyle, marginRight: '0.75rem' }} />
+            )}
+            <div style={{ display: 'inline-block', padding: '0.6rem 0.85rem', borderRadius: '10px', backgroundColor: isUser ? '#0b63c6' : '#e8e8e8', color: isUser ? '#fff' : '#000', maxWidth: '60%', wordWrap: 'break-word', whiteSpace: 'pre-wrap' }}>
+              {msg.text}
+            </div>
+            {isUser && (
+              <div style={{ marginLeft: '0.75rem', display: 'flex', alignItems: 'center' }}>
+                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ borderRadius: '50%', background: '#fff', border: '2px solid #0b63c6', boxShadow: '0 2px 6px rgba(0,0,0,0.12)' }}>
+                  <path d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4z" fill="#0b63c6" />
+                  <path d="M4 20c0-2.21 3.58-4 8-4s8 1.79 8 4v1H4v-1z" fill="#0b63c6" />
+                </svg>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      return (
+        <>
+      {/* Header with title and controls */}
+      <header style={{ position: 'fixed', top: '12px', left: '50%', transform: 'translateX(-50%)', zIndex: 90, width: 'min(100%, 1200px)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0.5rem 1rem', background: 'rgba(255,255,255,0.97)', borderRadius: '12px', boxShadow: '0 6px 18px rgba(0,0,0,0.08)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <img src={GotaBase} alt="Mascota" style={{ width: '56px', height: '56px', objectFit: 'contain', borderRadius: '50%', border: '2px solid #0b63c6', boxShadow: '0 2px 6px rgba(0,0,0,0.12)' }} />
+          <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#0b1720' }}>GotinBot</div>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button onClick={handleRestartChat} title="Reiniciar conversación" style={{ padding: '0.4rem 0.65rem', borderRadius: '20px', border: 'none', cursor: 'pointer', background: '#0b63c6', color: '#fff', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 6V3L8 7l4 4V8c2.76 0 5 2.24 5 5a5 5 0 0 1-5 5 5 5 0 0 1-5-5H5a7 7 0 0 0 7 7 7 7 0 0 0 7-7c0-3.87-3.13-7-7-7z"/></svg>
+            <span>Reiniciar</span>
           </button>
-          <button
-            onClick={handleGoHome}
-            style={{
-              padding: '0.75rem 1.25rem',
-              backgroundColor: '#fff',
-              color: '#0b63c6',
-              border: 'none',
-              borderRadius: '20px',
-              cursor: 'pointer',
-              fontWeight: '600',
-              fontSize: '0.95rem',
-              transition: 'all 200ms',
-            }}
-            onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#e8f2ff'
-              e.target.style.transform = 'scale(1.05)'
-            }}
-            onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#fff'
-              e.target.style.transform = 'scale(1)'
-            }}
-          >
-            🏠 Inicio
+          <button onClick={handleGoHome} title="Volver al inicio" style={{ padding: '0.4rem 0.65rem', borderRadius: '20px', border: 'none', cursor: 'pointer', background: '#fff', color: '#0b63c6', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg>
+            <span>Inicio</span>
           </button>
         </div>
-      </div>
+      </header>
 
       {/* Main chat area */}
-      <main style={{ padding: '2rem', maxWidth: '1200px', minHeight: '80vh', backgroundColor: '#fff', borderRadius: '12px', margin: '2rem auto', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
+      <main style={{ position: 'relative', padding: '2rem', paddingTop: '5rem', maxWidth: '1200px', minHeight: '80vh', backgroundColor: '#fff', borderRadius: '12px', margin: '2rem auto', boxShadow: '0 4px 20px rgba(0,0,0,0.1)' }}>
+        {/* Background logo (semi-transparent, centered) */}
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', justifyContent: 'center', alignItems: 'center', pointerEvents: 'none', zIndex: 0 }}>
+          <img src={CooperativaLogo} alt="Cooperativa logo" style={{ width: '320px', opacity: 0.06, filter: 'grayscale(100%)' }} />
+        </div>
+        <div style={{ position: 'relative', zIndex: 1 }}>
         {chatState === 'main' && (
           <>
             <p style={{ fontSize: '1.1rem', marginBottom: '2rem', textAlign: 'center' }}>
-              ¡Hola! Soy el chatbot de la Cooperativa de Agua Potable La Compañía. ¿En qué puedo
-              ayudarte hoy? Puedes preguntarme sobre facturación, servicios, pagos, experiencias
-              con la cooperativa, etc.
+              ¡Hola! Soy GotinBot, el asistente de la Cooperativa La Compañía. Estoy aquí para
+              ayudarte con preguntas generales sobre servicios, facturación, pagos y atención.
+              Puedes preguntar de forma anónima; si necesitas trámites específicos sobre boletas,
+              selecciona "Consulta de boletas".
             </p>
 
             {/* Botones de opciones principales */}
@@ -865,18 +1263,19 @@ function App() {
             {/* Chat libre en pantalla principal */}
             <div
               style={{
-                maxWidth: '720px',
+                maxWidth: '900px',
                 margin: '0 auto 2rem',
                 backgroundColor: '#f7f9fc',
                 border: '1px solid #e0e6f0',
                 borderRadius: '12px',
-                padding: '1rem',
+                padding: '1.25rem',
                 boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
               }}
             >
               <div
+                ref={mainMessagesRef}
                 style={{
-                  maxHeight: '220px',
+                    maxHeight: '340px',
                   overflowY: 'auto',
                   padding: '0.5rem',
                   marginBottom: '0.75rem',
@@ -890,22 +1289,15 @@ function App() {
                     Escribe tu pregunta y te responderé aquí.
                   </div>
                 )}
-                {mainChatMessages.map((msg, idx) => (
-                  <div
-                    key={idx}
-                    style={{
-                      alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                      backgroundColor: msg.role === 'user' ? '#0b63c6' : '#e8edf5',
-                      color: msg.role === 'user' ? '#fff' : '#1f2d3d',
-                      padding: '0.65rem 0.85rem',
-                      borderRadius: '10px',
-                      maxWidth: '80%',
-                      whiteSpace: 'pre-wrap',
-                    }}
-                  >
-                    {msg.text}
+                {mainChatMessages.map((msg, idx) => renderMessage(msg, idx))}
+                {isTyping && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-start', marginBottom: '1rem', alignItems: 'flex-end' }}>
+                    <img src={getBotAvatarSrc()} alt="bot-avatar" style={{ width: 48, height: 48, borderRadius: '50%', objectFit: 'cover', border: '2px solid #0b63c6', boxShadow: '0 2px 6px rgba(0,0,0,0.12)', marginRight: '0.75rem' }} />
+                    <div style={{ display: 'inline-block', padding: '0.6rem 0.85rem', borderRadius: '10px', backgroundColor: '#e8e8e8', color: '#000', maxWidth: '60%' }}>
+                      <em>Escribiendo...</em>
+                    </div>
                   </div>
-                ))}
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -916,14 +1308,15 @@ function App() {
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleMainQuestionSubmit()
                   }}
-                  placeholder="Escribe tu pregunta aquí"
+                  placeholder="Escribe tu pregunta aquí (ej: horarios, pagos, servicios...)"
                   style={{
                     flex: 1,
-                    padding: '0.85rem 1rem',
-                    borderRadius: '10px',
+                    padding: '1.05rem 1.25rem',
+                    borderRadius: '12px',
                     border: '1px solid #cfd8e3',
-                    fontSize: '1rem',
+                    fontSize: '1.05rem',
                     outline: 'none',
+                    minHeight: '48px',
                   }}
                 />
                 <button
@@ -958,136 +1351,68 @@ function App() {
         )}
 
         {chatState === 'emergency' && (
-          <div style={{ maxHeight: '65vh', overflowY: 'auto', marginBottom: '5rem' }}>
-            {messages.map((msg, idx) => (
-              <div
-                key={idx}
-                style={{
-                  marginBottom: '1rem',
-                  textAlign: msg.role === 'user' ? 'right' : 'left',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'inline-block',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '10px',
-                    backgroundColor: msg.role === 'user' ? '#0b63c6' : '#e8e8e8',
-                    color: msg.role === 'user' ? '#fff' : '#000',
-                    maxWidth: '70%',
-                    wordWrap: 'break-word',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {msg.text}
+          <div ref={messagesContainerRef} style={{ maxHeight: '65vh', overflowY: 'auto', marginBottom: '5rem' }}>
+            {messages.map((msg, idx) => renderMessage(msg, idx))}
+            {isTyping && (
+              <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                <div style={{ display: 'inline-block', padding: '0.5rem 0.75rem', borderRadius: '10px', backgroundColor: '#e8e8e8', color: '#000' }}>
+                  escribiendo...
                 </div>
               </div>
-            ))}
+            )}
           </div>
         )}
 
         {chatState === 'emergency_complete' && (
           <div style={{ maxHeight: '65vh', overflowY: 'auto', marginBottom: '5rem' }}>
-            {messages.map((msg, idx) => (
-              <div
-                key={idx}
-                style={{
-                  marginBottom: '1rem',
-                  textAlign: msg.role === 'user' ? 'right' : 'left',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'inline-block',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '10px',
-                    backgroundColor: msg.role === 'user' ? '#0b63c6' : '#e8e8e8',
-                    color: msg.role === 'user' ? '#fff' : '#000',
-                    maxWidth: '70%',
-                    wordWrap: 'break-word',
-                  }}
-                >
-                  {msg.text}
-                </div>
-              </div>
-            ))}
+            {messages.map((msg, idx) => renderMessage(msg, idx))}
           </div>
         )}
 
         {chatState === 'boletas' && (
-          <div style={{ maxHeight: '65vh', overflowY: 'auto', marginBottom: '5rem' }}>
-            {messages.map((msg, idx) => (
-              <div
-                key={idx}
-                style={{
-                  marginBottom: '1rem',
-                  textAlign: msg.role === 'user' ? 'right' : 'left',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'inline-block',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '10px',
-                    backgroundColor: msg.role === 'user' ? '#0b63c6' : '#e8e8e8',
-                    color: msg.role === 'user' ? '#fff' : '#000',
-                    maxWidth: '70%',
-                    wordWrap: 'break-word',
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {msg.text}
+          <div ref={messagesContainerRef} style={{ maxHeight: '65vh', overflowY: 'auto', marginBottom: '5rem' }}>
+            {messages.map((msg, idx) => renderMessage(msg, idx))}
+            {isTyping && (
+              <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                <div style={{ display: 'inline-block', padding: '0.5rem 0.75rem', borderRadius: '10px', backgroundColor: '#e8e8e8', color: '#000' }}>
+                  escribiendo...
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {chatState === 'boletas_complete' && (
-          <div style={{ maxHeight: '65vh', overflowY: 'auto', marginBottom: '5rem' }}>
-            {messages.map((msg, idx) => (
-              <div
-                key={idx}
-                style={{
-                  marginBottom: '1rem',
-                  textAlign: msg.role === 'user' ? 'right' : 'left',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'inline-block',
-                    padding: '0.75rem 1rem',
-                    borderRadius: '10px',
-                    backgroundColor: msg.role === 'user' ? '#0b63c6' : '#e8e8e8',
-                    color: msg.role === 'user' ? '#fff' : '#000',
-                    maxWidth: '70%',
-                    wordWrap: 'break-word',
-                  }}
-                >
-                  {msg.text}
-                </div>
-              </div>
-            ))}
-            {/* Mostrar resultados de boletas como tarjetas legibles */}
-            {boletasResults && (
-              <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {boletasResults.map((b) => (
-                  <div key={b.id_boleta || b.id} style={{ border: '1px solid #e0e0e0', padding: '0.75rem', borderRadius: '8px', background: '#fff', maxWidth: '90%' }}>
-                    <div style={{ fontWeight: 700 }}>{b.nombre} <span style={{ fontWeight: 400, marginLeft: '0.5rem', color: '#666' }}>{b.rut}</span></div>
-                    <div style={{ fontSize: '0.9rem', color: '#444', marginTop: '0.25rem' }}>{b.direccion || ''}</div>
-                    <div style={{ marginTop: '0.5rem', display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-                      <div><strong>Periodo:</strong> {b.periodo_facturacion}</div>
-                      <div><strong>Emisión:</strong> {b.fecha_emision}</div>
-                      <div><strong>Consumo:</strong> {b.consumo} m³</div>
-                      <div><strong>Monto:</strong> ${b.monto}</div>
-                      <div><strong>Estado:</strong> {b.estado_pago_display || b.estado_pago}</div>
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </div>
         )}
+
+        {chatState === 'boletas_complete' && (
+          <>
+            <div ref={messagesContainerRef} style={{ maxHeight: '55vh', overflowY: 'auto', marginBottom: '6.5rem' }}>
+              {messages.map((msg, idx) => renderMessage(msg, idx))}
+              {isTyping && (
+                <div style={{ marginBottom: '1rem', textAlign: 'left' }}>
+                  <div style={{ display: 'inline-block', padding: '0.5rem 0.75rem', borderRadius: '10px', backgroundColor: '#e8e8e8', color: '#000' }}>
+                    escribiendo...
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Fixed panel above input to keep boletas visible */}
+            {boletasResults && (
+              <div style={{ position: 'fixed', bottom: '86px', left: '50%', transform: 'translateX(-50%)', width: 'min(100%, 1200px)', maxWidth: 'calc(100% - 4rem)', background: '#fff', padding: '0.75rem', borderRadius: '10px', boxShadow: '0 6px 18px rgba(0,0,0,0.08)', maxHeight: '180px', overflowY: 'auto', zIndex: 60 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {boletasResults.map((b) => (
+                    <div key={b.id_boleta || b.id} style={{ border: '1px solid #e0e0e0', padding: '0.5rem', borderRadius: '6px', background: '#fff', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontWeight: 700 }}>{b.nombre} <span style={{ fontWeight: 400, marginLeft: '0.5rem', color: '#666' }}>{b.rut}</span></div>
+                        <div style={{ fontSize: '0.85rem', color: '#444' }}>{b.periodo_facturacion} • Consumo: {b.consumo} m³ • ${b.monto}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        </div>
       </main>
 
       {/* Input area para flujo de emergencia */}
@@ -1109,6 +1434,7 @@ function App() {
             borderRadius: '12px 12px 0 0',
           }}
         >
+          
           <input
             type="text"
             id="emergency-input"
@@ -1187,6 +1513,7 @@ function App() {
             borderRadius: '12px 12px 0 0',
           }}
         >
+          
           <input
             type="file"
             accept="image/*"
@@ -1241,6 +1568,7 @@ function App() {
             borderRadius: '12px 12px 0 0',
           }}
         >
+          
           <input
             type="text"
             id="boletas-input"
@@ -1248,9 +1576,19 @@ function App() {
             onKeyPress={(e) => {
               if (e.key === 'Enter') {
                 const input = e.target.value
-                if (input.trim() && chatState === 'boletas') {
-                  handleBoletasResponse(input)
-                  e.target.value = ''
+                if (input.trim()) {
+                  // Si estamos en selección para comparar, o en el flujo de boletas
+                  if (awaitingCompareSelection && compareCandidates && compareCandidates.length > 0) {
+                    handleBoletasResponse(input)
+                    e.target.value = ''
+                  } else if (chatState === 'boletas') {
+                    handleBoletasResponse(input)
+                    e.target.value = ''
+                  } else if (chatState === 'boletas_complete') {
+                    // Permitir seguir conversando con la IA
+                    handleContinueConversationFromBoletas(input)
+                    e.target.value = ''
+                  }
                 }
               }
             }}
@@ -1269,9 +1607,17 @@ function App() {
           <button
             onClick={() => {
               const input = document.getElementById('boletas-input').value
-              if (input.trim() && chatState === 'boletas') {
-                handleBoletasResponse(input)
-                document.getElementById('boletas-input').value = ''
+              if (input.trim()) {
+                if (awaitingCompareSelection && compareCandidates && compareCandidates.length > 0) {
+                  handleBoletasResponse(input)
+                  document.getElementById('boletas-input').value = ''
+                } else if (chatState === 'boletas') {
+                  handleBoletasResponse(input)
+                  document.getElementById('boletas-input').value = ''
+                } else if (chatState === 'boletas_complete') {
+                  handleContinueConversationFromBoletas(input)
+                  document.getElementById('boletas-input').value = ''
+                }
               }
             }}
             style={{

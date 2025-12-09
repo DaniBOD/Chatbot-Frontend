@@ -16,6 +16,7 @@ export default function EmergencyForm({ onSubmit = () => {}, onClose = () => {},
   const [tipoEmergencia, setTipoEmergencia] = useState('')
   const [estadoEmergencia, setEstadoEmergencia] = useState('')
   const [direccion, setDireccion] = useState('')
+  const [fotografia, setFotografia] = useState(null)
 
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState(null)
@@ -61,14 +62,33 @@ export default function EmergencyForm({ onSubmit = () => {}, onClose = () => {},
     setMessage(null)
     if (!validate()) return
 
-    const data = {
-      nombreCompleto,
-      telefono,
-      sector,
-      descripcion,
-      tipoEmergencia,
-      estadoEmergencia,
-      direccion,
+    // Cuando hay una fotografía, usamos FormData para enviar multipart/form-data
+    let body = null
+    let headers = { }
+    if (fotografia) {
+      const fd = new FormData()
+      fd.append('nombre_usuario', nombreCompleto)
+      fd.append('telefono', normalizePhone(telefono))
+      fd.append('sector', sector)
+      fd.append('descripcion', descripcion)
+      fd.append('tipo_emergencia', tipoEmergencia)
+      fd.append('estado_emergencia', estadoEmergencia)
+      fd.append('direccion', direccion)
+      fd.append('fotografia', fotografia)
+      body = fd
+      // DO NOT set Content-Type header; browser will set multipart boundary
+    } else {
+      const data = {
+        nombre_usuario: nombreCompleto,
+        telefono: normalizePhone(telefono),
+        sector,
+        descripcion,
+        tipo_emergencia: tipoEmergencia,
+        estado_emergencia: estadoEmergencia,
+        direccion,
+      }
+      body = JSON.stringify(data)
+      headers['Content-Type'] = 'application/json'
     }
 
     const url = apiPath || emergencyUrl()
@@ -77,16 +97,32 @@ export default function EmergencyForm({ onSubmit = () => {}, onClose = () => {},
     try {
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
+        headers,
+        body,
       })
       if (!res.ok) {
-        const text = await res.text().catch(() => null)
-        throw new Error(text || `HTTP ${res.status}`)
+        // Intentar obtener detalle del error desde la API (JSON), si falla, leer texto
+        let errMsg = null
+        try {
+          const errJson = await res.json()
+          // DRF suele devolver detalles en formato {field: [errors]} o {detail: '...'}
+          if (errJson.detail) errMsg = errJson.detail
+          else if (typeof errJson === 'object') {
+            // Concatenar mensajes de campos
+            errMsg = Object.entries(errJson)
+              .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
+              .join(' | ')
+          } else {
+            errMsg = String(errJson)
+          }
+        } catch (ex) {
+          errMsg = await res.text().catch(() => `HTTP ${res.status}`)
+        }
+        throw new Error(errMsg || `HTTP ${res.status}`)
       }
       const json = await res.json().catch(() => ({}))
       setMessage({ type: 'success', text: 'Emergencia enviada correctamente.' })
-      onSubmit(data, json)
+      onSubmit({ nombreCompleto, telefono: normalizePhone(telefono), sector, descripcion, tipoEmergencia, estadoEmergencia, direccion, fotografia: fotografia ? fotografia.name : null }, json)
       // reset fields after success
       setNombreCompleto('')
       setTelefono('')
@@ -98,10 +134,22 @@ export default function EmergencyForm({ onSubmit = () => {}, onClose = () => {},
       setErrors({})
     } catch (err) {
       console.error(err)
-      setMessage({ type: 'error', text: 'No se pudo enviar. Verifica la conexión.' })
+      const text = err && err.message ? err.message : 'No se pudo enviar. Verifica la conexión.'
+      setMessage({ type: 'error', text })
     } finally {
       setSubmitting(false)
     }
+  }
+
+  // Normalize phone to digits with optional leading +
+  function normalizePhone(phone) {
+    if (!phone) return ''
+    let p = String(phone).trim()
+    // Preserve leading + if present, then remove all non-digits
+    const hasPlus = p.startsWith('+')
+    p = p.replace(/[^0-9]/g, '')
+    if (hasPlus) p = '+' + p
+    return p
   }
 
   // Helper to render input fields with ARIA and inline errors
@@ -156,6 +204,22 @@ export default function EmergencyForm({ onSubmit = () => {}, onClose = () => {},
       {renderField({ id: 'estadoEmergencia', label: 'Estado de emergencia', value: estadoEmergencia, setValue: setEstadoEmergencia, placeholder: 'Ej: Activa, Contenida' })}
 
       {renderField({ id: 'descripcion', label: 'Descripción', value: descripcion, setValue: setDescripcion, placeholder: 'Describe lo que está ocurriendo...', type: 'textarea' })}
+
+      <div className="emergency-form-row">
+        <label htmlFor="fotografia">Fotografía (opcional)</label>
+        <input
+          id="fotografia"
+          type="file"
+          accept="image/*"
+          onChange={(e) => setFotografia(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+          aria-describedby={errors.fotografia ? 'fotografia-error' : undefined}
+        />
+        {fotografia && (
+          <div style={{ fontSize: 12, color: '#333', marginTop: 6 }}>
+            Archivo seleccionado: {fotografia.name}
+          </div>
+        )}
+      </div>
 
       <div className="emergency-form-actions">
         <button type="button" className="btn secondary" onClick={onClose} disabled={submitting} aria-disabled={submitting}>Cancelar</button>
