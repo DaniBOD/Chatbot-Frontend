@@ -59,6 +59,9 @@ function App() {
   const [waitingForImage, setWaitingForImage] = useState(false)
   const [emergencyImage, setEmergencyImage] = useState(null)
 
+  // Estado para manejar "Otro" en tipo de emergencia
+  const [waitingForOtherEmergency, setWaitingForOtherEmergency] = useState(false)
+
   // Campos del formulario de emergencia en orden
   const emergencyFields = [
     { key: 'nombreCompleto', label: 'Nombre completo', placeholder: 'Ej: Ana Pérez' },
@@ -66,8 +69,8 @@ function App() {
     { key: 'sector', label: 'Sector', placeholder: 'Ej: Centro' },
     { key: 'direccion', label: 'Dirección', placeholder: 'Calle, número' },
     { key: 'tipoEmergencia', label: 'Tipo de emergencia', placeholder: 'Ej: Incendio, Accidente' },
-    { key: 'estadoEmergencia', label: 'Estado de emergencia', placeholder: 'Ej: Activa, Contenida' },
-    { key: 'descripcion', label: 'Descripción detallada', placeholder: 'Describe lo que ocurre' },
+    { key: 'estadoEmergencia', label: 'El Estado de emergencia', placeholder: 'Ej: Activa, Contenida' },
+    { key: 'descripcion', label: 'Descripción detallada del problema', placeholder: 'Describe lo que ocurre' },
   ]
 
   // Campos del formulario de consulta de boletas
@@ -89,6 +92,95 @@ function App() {
         text: `Entendido, voy a recopilar información sobre tu emergencia. Comenzamos:\n\n¿Cuál es tu ${emergencyFields[0].label.toLowerCase()}?`,
       },
     ])
+  }
+
+  // Reinicia el chat
+  function handleRestartChat() {
+    // Reseteamos el estado según la pantalla actual
+    if (chatState === 'emergency' || chatState === 'emergency_complete') {
+      // Reiniciar protocolo de emergencia automáticamente
+      setChatState('emergency')
+      setEmergencyStep(0)
+      setWaitingForImage(false)
+      setEmergencyImage(null)
+      setWaitingForOtherEmergency(false)
+      setEmergencyData({
+        nombreCompleto: '',
+        telefono: '',
+        sector: '',
+        direccion: '',
+        tipoEmergencia: '',
+        estadoEmergencia: '',
+        descripcion: '',
+      })
+      setMessages([
+        {
+          role: 'user',
+          text: 'Reportar emergencia',
+        },
+        {
+          role: 'bot',
+          text: `Entendido, voy a recopilar información sobre tu emergencia. Comenzamos:\n\n¿Cuál es tu nombre completo?`,
+        },
+      ])
+    } else if (chatState === 'boletas' || chatState === 'boletas_complete') {
+      // Reiniciar protocolo de boletas automáticamente
+      setChatState('boletas')
+      setBoletasStep(0)
+      setBoletasData({
+        nombreCompleto: '',
+        rut: '',
+        numeroCliente: '',
+      })
+      setMessages([
+        {
+          role: 'user',
+          text: 'Consulta de boletas',
+        },
+        {
+          role: 'bot',
+          text: `Perfecto, voy a ayudarte con tu consulta de boletas. Que es lo que necesito saber:\n 1. Consultar consumo \n 2. Consultar monto a pagar \n 3. Comparar y /o ver boletas`,
+        },
+      ])
+    } else {
+      // Pantalla principal
+      setMessages([
+        {
+          role: 'bot',
+          text: '¡Hola! Soy el chatbot de la Cooperativa de Agua Potable La Compañía. ¿En qué puedo ayudarte hoy?',
+        },
+      ])
+    }
+  }
+
+  // Vuelve a la página de inicio (pantalla principal del chat)
+  function handleGoHome() {
+    setChatState('main')
+    setEmergencyStep(0)
+    setBoletasStep(0)
+    setWaitingForImage(false)
+    setEmergencyImage(null)
+    setWaitingForOtherEmergency(false)
+    setMessages([
+      {
+        role: 'bot',
+        text: '¡Hola! Soy el chatbot de la Cooperativa de Agua Potable La Compañía. ¿En qué puedo ayudarte hoy?',
+      },
+    ])
+    setEmergencyData({
+      nombreCompleto: '',
+      telefono: '',
+      sector: '',
+      direccion: '',
+      tipoEmergencia: '',
+      estadoEmergencia: '',
+      descripcion: '',
+    })
+    setBoletasData({
+      nombreCompleto: '',
+      rut: '',
+      numeroCliente: '',
+    })
   }
 
   // Inicia flujo de consulta de boletas
@@ -187,6 +279,167 @@ function App() {
 
     // Preguntas normales del formulario
     const currentField = emergencyFields[emergencyStep]
+    
+    // Manejo especial para "tipo de emergencia - Otro"
+    if (waitingForOtherEmergency) {
+      const newData = { ...emergencyData, tipoEmergencia: `Otro: ${userInput}` }
+      setEmergencyData(newData)
+      setWaitingForOtherEmergency(false)
+      
+      const updatedMessages = [...messages, { role: 'user', text: userInput }]
+      
+      // Siguiente pregunta (después de tipoEmergencia)
+      const nextField = emergencyFields[emergencyStep + 1]
+      if (nextField.key === 'estadoEmergencia') {
+        // Mostrar opciones de estado si corresponde
+        updatedMessages.push({
+          role: 'bot',
+          text: '¿Cuál es el estado de la emergencia?\n1. Baja\n2. Media\n3. Alta\n4. Critica',
+        })
+      } else {
+        updatedMessages.push({
+          role: 'bot',
+          text: `¿Cuál es tu ${nextField.label.toLowerCase()}?`,
+        })
+      }
+      setMessages(updatedMessages)
+      setEmergencyStep(emergencyStep + 1)
+      return
+    }
+    
+    // Manejo especial para el campo "tipoEmergencia"
+    if (currentField.key === 'tipoEmergencia') {
+      const updatedMessages = [...messages, { role: 'user', text: userInput }]
+      const tipoOptions = [
+        'Rotura de matriz',
+        'Baja presion',
+        'Fuga agua',
+        'Cañeria rota',
+        'Agua contaminada',
+        'Falta de agua',
+        'Otro'
+      ]
+      
+      const tipoNumber = parseInt(userInput.trim())
+      if (tipoNumber >= 1 && tipoNumber <= 7) {
+        const selectedTipo = tipoOptions[tipoNumber - 1]
+        
+        if (tipoNumber === 7) {
+          // Usuario seleccionó "Otro"
+          updatedMessages.push({
+            role: 'bot',
+            text: 'Has seleccionado: Otro\n\nPor favor, especifica el tipo de emergencia:',
+          })
+          setMessages(updatedMessages)
+          setWaitingForOtherEmergency(true)
+        } else {
+          // Usuario seleccionó una opción predefinida
+          const newData = { ...emergencyData, tipoEmergencia: selectedTipo }
+          setEmergencyData(newData)
+          
+          // Siguiente pregunta
+          const nextField = emergencyFields[emergencyStep + 1]
+          
+          // Si el siguiente campo es "estadoEmergencia", mostrar las opciones
+          if (nextField.key === 'estadoEmergencia') {
+            updatedMessages.push({
+              role: 'bot',
+              text: `Has seleccionado: ${selectedTipo}\n\n¿Cuál es el estado de la emergencia?\n1. Baja\n2. Media\n3. Alta\n4. Critica`,
+            })
+          } else {
+            updatedMessages.push({
+              role: 'bot',
+              text: `Has seleccionado: ${selectedTipo}\n\n¿Cuál es tu ${nextField.label.toLowerCase()}?`,
+            })
+          }
+          setMessages(updatedMessages)
+          setEmergencyStep(emergencyStep + 1)
+        }
+      } else {
+        // Opción inválida
+        updatedMessages.push({
+          role: 'bot',
+          text: 'Por favor, selecciona un número válido del 1 al 7.',
+        })
+        setMessages(updatedMessages)
+      }
+      return
+    }
+    
+    // Manejo especial para el campo "sector"
+    if (currentField.key === 'sector') {
+      const updatedMessages = [...messages, { role: 'user', text: userInput }]
+      const sectorOptions = [
+        'Anibana',
+        'El molino',
+        'La compañia',
+        'El maiten 1',
+        'El maiten 2',
+        'La morena',
+        'Santa margarita'
+      ]
+      
+      const sectorNumber = parseInt(userInput.trim())
+      if (sectorNumber >= 1 && sectorNumber <= 7) {
+        const selectedSector = sectorOptions[sectorNumber - 1]
+        const newData = { ...emergencyData, sector: selectedSector }
+        setEmergencyData(newData)
+        
+        // Siguiente pregunta
+        const nextField = emergencyFields[emergencyStep + 1]
+        updatedMessages.push({
+          role: 'bot',
+          text: `Has seleccionado: ${selectedSector}\n\n¿Cuál es tu ${nextField.label.toLowerCase()}?`,
+        })
+        setMessages(updatedMessages)
+        setEmergencyStep(emergencyStep + 1)
+      } else {
+        // Opción inválida
+        updatedMessages.push({
+          role: 'bot',
+          text: 'Por favor, selecciona un número válido del 1 al 7.',
+        })
+        setMessages(updatedMessages)
+      }
+      return
+    }
+    
+    // Manejo especial para el campo "estadoEmergencia"
+    if (currentField.key === 'estadoEmergencia') {
+      const updatedMessages = [...messages, { role: 'user', text: userInput }]
+      const estadoOptions = [
+        'Baja',
+        'Media',
+        'Alta',
+        'Critica'
+      ]
+      
+      const estadoNumber = parseInt(userInput.trim())
+      if (estadoNumber >= 1 && estadoNumber <= 4) {
+        const selectedEstado = estadoOptions[estadoNumber - 1]
+        const newData = { ...emergencyData, estadoEmergencia: selectedEstado }
+        setEmergencyData(newData)
+        
+        // Siguiente pregunta
+        const nextField = emergencyFields[emergencyStep + 1]
+        updatedMessages.push({
+          role: 'bot',
+          text: `Has seleccionado: ${selectedEstado}\n\n¿Cuál es tu ${nextField.label.toLowerCase()}?`,
+        })
+        setMessages(updatedMessages)
+        setEmergencyStep(emergencyStep + 1)
+      } else {
+        // Opción inválida
+        updatedMessages.push({
+          role: 'bot',
+          text: 'Por favor, selecciona un número válido del 1 al 4.',
+        })
+        setMessages(updatedMessages)
+      }
+      return
+    }
+    
+    // Para otros campos, procesamiento normal
     const newData = { ...emergencyData, [currentField.key]: userInput }
     setEmergencyData(newData)
 
@@ -195,10 +448,34 @@ function App() {
 
     // Siguiente pregunta
     const nextField = emergencyFields[emergencyStep + 1]
-    updatedMessages.push({
-      role: 'bot',
-      text: `¿Cuál es tu ${nextField.label.toLowerCase()}?`,
-    })
+    
+    // Si el siguiente campo es "tipoEmergencia", mostrar las opciones
+    if (nextField.key === 'tipoEmergencia') {
+      updatedMessages.push({
+        role: 'bot',
+        text: `¿Qué tipo de emergencia es?\n1. Rotura de matriz\n2. Baja presion\n3. Fuga agua\n4. Cañeria rota\n5. Agua contaminada\n6. Falta de agua\n7. Otro`,
+      })
+    }
+    // Si el siguiente campo es "estadoEmergencia", mostrar las opciones
+    else if (nextField.key === 'estadoEmergencia') {
+      updatedMessages.push({
+        role: 'bot',
+        text: `¿Cuál es el estado de la emergencia?\n1. Baja\n2. Media\n3. Alta\n4. Critica`,
+      })
+    }
+    // Si el siguiente campo es "sector", mostrar las opciones
+    else if (nextField.key === 'sector') {
+      updatedMessages.push({
+        role: 'bot',
+        text: `¿En qué sector te encuentras?\n1. Anibana\n2. El molino\n3. La compañia\n4. El maiten 1\n5. El maiten 2\n6. La morena\n7. Santa margarita`,
+      })
+    } else {
+      updatedMessages.push({
+        role: 'bot',
+        text: `¿Cuál es tu ${nextField.label.toLowerCase()}?`,
+      })
+    }
+    
     setMessages(updatedMessages)
     setEmergencyStep(emergencyStep + 1)
   }
@@ -384,8 +661,58 @@ function App() {
   return (
     <>
       {/* Header */}
-      <div style={{ backgroundColor: '#0b63c6', color: '#fff', padding: '1rem', textAlign: 'center' }}>
-        <h1>💬 Chatbot - La Compañía</h1>
+      <div style={{ backgroundColor: '#0b63c6', color: '#fff', padding: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ margin: 0, flex: 1, textAlign: 'center' }}>💬 Chatbot - La Compañía</h1>
+        <div style={{ display: 'flex', gap: '0.75rem' }}>
+          <button
+            onClick={handleRestartChat}
+            style={{
+              padding: '0.75rem 1.25rem',
+              backgroundColor: '#fff',
+              color: '#0b63c6',
+              border: 'none',
+              borderRadius: '20px',
+              cursor: 'pointer',
+              fontWeight: '600',
+              fontSize: '0.95rem',
+              transition: 'all 200ms',
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#e8f2ff'
+              e.target.style.transform = 'scale(1.05)'
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#fff'
+              e.target.style.transform = 'scale(1)'
+            }}
+          >
+            🔄 Reiniciar Chat
+          </button>
+          <button
+            onClick={handleGoHome}
+            style={{
+              padding: '0.75rem 1.25rem',
+              backgroundColor: '#fff',
+              color: '#0b63c6',
+              border: 'none',
+              borderRadius: '20px',
+              cursor: 'pointer',
+              fontWeight: '600',
+              fontSize: '0.95rem',
+              transition: 'all 200ms',
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#e8f2ff'
+              e.target.style.transform = 'scale(1.05)'
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#fff'
+              e.target.style.transform = 'scale(1)'
+            }}
+          >
+            🏠 Inicio
+          </button>
+        </div>
       </div>
 
       {/* Main chat area */}
