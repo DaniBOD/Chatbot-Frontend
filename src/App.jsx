@@ -554,7 +554,7 @@ function App() {
           text: 'Actualmente la consulta por número de cliente no está disponible. Por favor proporciona tu RUT para continuar. (Ej: 12345678-9)'
         })
         // Guardar que vamos a identificar por RUT
-        setBoletasData({ ...boletasData, identificationType: 'rut' })
+        setBoletasData((prev) => ({ ...prev, identificationType: 'rut' }))
         setMessages(updatedMessages)
         setBoletasStep(2)
       } else if (userInput.trim() === '2') {
@@ -563,7 +563,7 @@ function App() {
           role: 'bot',
           text: '¿Cuál es tu RUT? (Ej: 12345678-9)',
         })
-        setBoletasData({ ...boletasData, identificationType: 'rut' })
+        setBoletasData((prev) => ({ ...prev, identificationType: 'rut' }))
         setMessages(updatedMessages)
         setBoletasStep(2)
       } else if (userInput.trim() === '3') {
@@ -573,7 +573,7 @@ function App() {
           text: '¿Cuál es tu nombre completo? (Ej: Juan Pérez)'
         })
         // Guardar que vamos a identificar por nombreCompleto
-        setBoletasData({ ...boletasData, identificationType: 'nombreCompleto' })
+        setBoletasData((prev) => ({ ...prev, identificationType: 'nombreCompleto' }))
         setMessages(updatedMessages)
         setBoletasStep(2)
       } else {
@@ -592,16 +592,21 @@ function App() {
 
     // Si es paso 2, guardar los datos y completar
     if (boletasStep === 2) {
-      const newData = { ...boletasData, [boletasData.identificationType]: userInput }
-      setBoletasData(newData)
-      
+      // Determinar si el input parece un RUT; si no, asumir nombre completo
+      const rutLike = /^\d{1,2}\.??\d{3}\.??\d{3}-[\dkKk]$|^\d{7,8}-[\dkKk]$/.test(userInput.trim())
+      const newData = rutLike
+        ? { ...boletasData, rut: userInput.trim() }
+        : { ...boletasData, nombreCompleto: userInput.trim() }
+      // Actualizar el estado de manera funcional
+      setBoletasData((prev) => ({ ...prev, ...newData }))
+
       updatedMessages.push({
         role: 'bot',
         text: '✓ Gracias por proporcionar tu información. Consultando tus boletas...',
       })
       setMessages(updatedMessages)
       setChatState('boletas_complete')
-      console.log('Boletas data:', newData)
+      console.log('Boletas data (final):', newData)
       // If user asked for monto a pagar, request only the vigente pendiente
       const payload = { ...newData }
       if (newData.queryType === 'pago') {
@@ -664,11 +669,13 @@ function App() {
 
     // TODO: Reemplazar con tu URL de backend
     const apiUrl = 'http://localhost:8000/api/boletas/consultar/'
-    console.debug('Enviar consulta boletas payload:', data)
+    // Remove empty keys to avoid backend filtering by empty strings
+    const payload = Object.fromEntries(Object.entries(data).filter(([, v]) => v !== '' && v !== null && v !== undefined))
+    console.debug('Enviar consulta boletas payload:', payload)
     fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(payload),
     })
       .then(async (res) => {
         const text = await res.text()
@@ -678,6 +685,7 @@ function App() {
         } catch (err) {
           // no-op
         }
+        console.debug('Boletas response raw:', parsed)
         if (res.ok) return parsed
         // If server returned errors in JSON, show them to user
         const errMsg = parsed && (parsed.detail || parsed.non_field_errors || parsed[Object.keys(parsed)[0]]) ? parsed : { detail: text || `HTTP ${res.status}` }
@@ -690,7 +698,8 @@ function App() {
         ])
         throw new Error(`HTTP ${res.status}`)
       })
-      .then((respData) => {
+        .then((respData) => {
+          console.debug('Boletas response parsed:', respData)
           // Normalizar lista (puede venir paginada) o un objeto único
           const list = respData && respData.results ? respData.results : respData
 
