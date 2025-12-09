@@ -31,6 +31,10 @@ function App() {
     },
   ])
 
+  // Chat libre en pantalla principal
+  const [mainChatInput, setMainChatInput] = useState('')
+  const [mainChatMessages, setMainChatMessages] = useState([])
+
   // Datos del formulario de emergencia recopilados en el chat
   const [emergencyData, setEmergencyData] = useState({
     nombreCompleto: '',
@@ -92,6 +96,8 @@ function App() {
         text: `Entendido, voy a recopilar información sobre tu emergencia. Comenzamos:\n\n¿Cuál es tu ${emergencyFields[0].label.toLowerCase()}?`,
       },
     ])
+    setMainChatMessages([])
+    setMainChatInput('')
   }
 
   // Reinicia el chat
@@ -150,6 +156,8 @@ function App() {
           text: '¡Hola! Soy el chatbot de la Cooperativa de Agua Potable La Compañía. ¿En qué puedo ayudarte hoy?',
         },
       ])
+      setMainChatMessages([])
+      setMainChatInput('')
     }
   }
 
@@ -181,6 +189,8 @@ function App() {
       rut: '',
       numeroCliente: '',
     })
+    setMainChatMessages([])
+    setMainChatInput('')
   }
 
   // Inicia flujo de consulta de boletas
@@ -195,6 +205,8 @@ function App() {
         text: `Perfecto, voy a ayudarte con tu consulta de boletas. Que es lo que necesito saber:\n 1. Consultar consumo \n 2. Consultar monto a pagar \n 3. Comparar y /o ver boletas`,
       },
     ])
+    setMainChatMessages([])
+    setMainChatInput('')
   }
 
   // Maneja la carga de imagen para emergencia
@@ -658,6 +670,21 @@ function App() {
     { label: 'Consulta de boletas', action: handleConsultaBoletas },
   ]
 
+  // Respuesta rápida en chat principal
+  function handleMainQuestionSubmit() {
+    const trimmed = mainChatInput.trim()
+    if (!trimmed) return
+
+    const userMsg = { role: 'user', text: trimmed }
+    const botMsg = {
+      role: 'bot',
+      text: `He recibido tu pregunta: "${trimmed}". Puedo ayudarte con información general de la cooperativa, pagos y boletas. Si prefieres, también puedes usar los botones de arriba.`,
+    }
+
+    setMainChatMessages((prev) => [...prev, userMsg, botMsg])
+    setMainChatInput('')
+  }
+
   return (
     <>
       {/* Header */}
@@ -753,6 +780,87 @@ function App() {
                   {btn.label}
                 </button>
               ))}
+            </div>
+
+            {/* Chat libre en pantalla principal */}
+            <div
+              style={{
+                maxWidth: '720px',
+                margin: '0 auto 2rem',
+                backgroundColor: '#f7f9fc',
+                border: '1px solid #e0e6f0',
+                borderRadius: '12px',
+                padding: '1rem',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.05)',
+              }}
+            >
+              <div
+                style={{
+                  maxHeight: '220px',
+                  overflowY: 'auto',
+                  padding: '0.5rem',
+                  marginBottom: '0.75rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.5rem',
+                }}
+              >
+                {mainChatMessages.length === 0 && (
+                  <div style={{ color: '#6c7a89', fontSize: '0.95rem', textAlign: 'center' }}>
+                    Escribe tu pregunta y te responderé aquí.
+                  </div>
+                )}
+                {mainChatMessages.map((msg, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                      backgroundColor: msg.role === 'user' ? '#0b63c6' : '#e8edf5',
+                      color: msg.role === 'user' ? '#fff' : '#1f2d3d',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '10px',
+                      maxWidth: '80%',
+                      whiteSpace: 'pre-wrap',
+                    }}
+                  >
+                    {msg.text}
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="text"
+                  value={mainChatInput}
+                  onChange={(e) => setMainChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleMainQuestionSubmit()
+                  }}
+                  placeholder="Escribe tu pregunta aquí"
+                  style={{
+                    flex: 1,
+                    padding: '0.85rem 1rem',
+                    borderRadius: '10px',
+                    border: '1px solid #cfd8e3',
+                    fontSize: '1rem',
+                    outline: 'none',
+                  }}
+                />
+                <button
+                  onClick={handleMainQuestionSubmit}
+                  style={{
+                    padding: '0.85rem 1.25rem',
+                    backgroundColor: '#0b63c6',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    cursor: 'pointer',
+                    fontWeight: '600',
+                  }}
+                >
+                  Enviar
+                </button>
+              </div>
             </div>
 
             {/* Imagen de la gota */}
